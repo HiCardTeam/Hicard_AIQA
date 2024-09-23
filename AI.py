@@ -3,7 +3,7 @@ from openai import OpenAI
 import os
 client = OpenAI(api_key=os.environ.get('openAI_api_key'))
 
-ASSISTANT_ID='asst_RCoiwMOoC64p0rEzv2gLMcR9'
+ASSISTANT_ID=os.environ.get('ASSISTANT_ID')
 
 def create_threads():
     thread = client.beta.threads.create()
