@@ -38,10 +38,15 @@ def handle_message(event):
             print(f'user_id:{user_id} is now in thread:{threadId}')
     
     if(AI.create_message(threadId,mtext)):
+        pushMSG(user_id)
         response=AI.create_run(threadId)
     message=TextSendMessage(text=response)
     line_bot_api.reply_message(event.reply_token,message)
-    
+
+def pushMSG(user_id):
+    message=TextSendMessage(text='回應生成中...')
+    line_bot_api.push_message(to=user_id,messages=[message])
+    return True
 if __name__ == '__main__':
     app.run()
     
