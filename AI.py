@@ -1,9 +1,50 @@
 
 from openai import OpenAI
+from googlesearch import search
 import os
 client = OpenAI(api_key=os.environ.get('openAI_api_key'))
 
 ASSISTANT_ID=os.environ.get('ASSISTANT_ID')
+def google_res(user_msg, num_results=5, verbose=False):
+    content = "以下是根據搜尋得到的可信資料：\n"  # 強調資料可靠
+    results = search(user_msg, advanced=True, num_results=num_results, lang='zh-TW')
+    
+    # 確保搜尋到結果
+    if results:
+        for res in results:
+            content += f"標題：{res.title}\n摘要：{res.description}\n\n"
+        content += "請依照以上資料回答您的問題。\n"  # 增加回應的指導性
+    else:
+        content += "抱歉，沒有找到相關結果，可能需要更多信息或精確的問題描述。\n"
+    
+    if verbose:
+        print('------------')
+        print(content)
+        print('------------')
+        
+    return content
+tools_list=[
+    {"type": "code_interpreter"}, 
+    {"type": "file_search"},
+    {
+        "type": "function",
+        "function": {
+            "name": "google_res",
+            "description": "在遇到難以確認或實時性問題時，自動以 Google 搜尋結果補充參考資料。適用於學術問題，回傳搜尋到的相關事實資料以幫助回答。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "user_msg": {
+                        "type": "string",
+                        "description": "從使用者的問題中擷取的主要關鍵字，用於 Google 搜尋。"
+                    }
+                },
+                "required": ["user_msg"]
+            }
+        }
+    }
+]
+
 
 def create_threads():
     thread = client.beta.threads.create()
@@ -12,61 +53,57 @@ def create_threads():
     
 def create_message(_threadId,prompt):
     try:
-      client.beta.threads.messages.create(
+        client.beta.threads.messages.create(
         thread_id=_threadId,
         role="user",
         content=prompt
         
-      )
-      return True
+        )
+        return True
     except:
-       return False
+        return False
+
+def statusHandler(run,_threadId):
+    if run.status == "completed":
+        messages = client.beta.threads.messages.list(thread_id=_threadId)
+        print("messages: ")
+        hist=[]
+        for message in messages:
+            assert message.content[0].type == "text"
+            hist.append({"role": message.role, "message": message.content[0].text.value})
+        print(hist[0].get('message'))
+        response=hist[0].get('message')
+        return response
+    elif run.status=='requires_action':
+        tool_outputs = []
+        for tool in run.required_action.submit_tool_outputs.tool_calls:
+            if tool.function.name == "google_res":
+                arguments=tool.function.arguments
+                tool_outputs.append({"tool_call_id": tool.id, "output": google_res(arguments)})
+                print(f'呼叫google search，關鍵字:{arguments}')
+            else:
+                print('找不到要呼叫的function')
+        client.beta.threads.runs.submit_tool_outputs_stream(
+        thread_id=_threadId,
+        run_id=run.id,
+        tool_outputs=tool_outputs
+        ) 
+    else:
+        print('對話未完成。')
 
 def  create_run(_threadId):
-  global ASSISTANT_ID
-  run=client.beta.threads.runs.create_and_poll(
-  thread_id=_threadId,
-  assistant_id=ASSISTANT_ID,
-  instructions="""1.你是一名使用繁體中文的高中教學專家，對於台灣教育部規範的高中課程標準內的所有科目知識都瞭若指掌，能耐心地引導學生解決他們提出的與課程相關的各類問題。
-
-2.嚴格限制回答內容。任何非學術性、個人或生活相關的問題請用詼諧的口吻帶過，但若是可以和學術有一些關聯可以藉此引導使用者問相關學術性的問題。
-
-3.你的主要目的是幫助學生理解課程中的關鍵知識，並提供精準且正確的解答，以有效支持他們的學習進程。務必確保回應內容嚴謹、精確，專注於學術問題。
-
-4.提供的檔案是目前台灣高中課綱，高中各科目、章節的重點整理，必要時請結合這些資訊在回應當中。
-
-5.回應的內容請以簡潔、清晰為原則不要過度包含標點符號。""",
-  tools=[{"type": "code_interpreter"}, {"type": "file_search"}]
-  )
-  print("Run completed with status: " + run.status)
-
-  if run.status == "completed":
-      messages = client.beta.threads.messages.list(thread_id=_threadId)
-
-      print("messages: ")
-      hist=[]
-      for message in messages:
-        assert message.content[0].type == "text"
-        hist.append({"role": message.role, "message": message.content[0].text.value})
-      print(hist[0].get('message'))
-      response=hist[0].get('message')
-      return response
-  else:
-     print('對話未完成。')
+    global ASSISTANT_ID
+    run=client.beta.threads.runs.create_and_poll(
+        thread_id=_threadId,
+        assistant_id=ASSISTANT_ID,
+    )
+    print("Run completed with status: " + run.status)
+    response=statusHandler(run,_threadId)
+    if(response):
+        return response
 
 def show_message(_threadId):
-  message=client.beta.threads.messages.list(thread_id=_threadId)
-  print(message)
+    message=client.beta.threads.messages.list(thread_id=_threadId)
+    print(message)
 
-# if __name__=='__main__':
-#   thread_id=create_threads()
-#   print(f'thread_id={thread_id}')
-#   if(create_message(thread_id,"""請問我想知道二元一次不等式，我該參考課本的哪個章節?""")):
-#      create_run(thread_id)
-  #  thread=Thread(id='thread_Ob1XbSj6toBjKE9lMgkCkxO1', created_at=1727076109, metadata={}, object='thread', tool_resources=ToolResources(code_interpreter=None, file_search=None))
-  #  print(thread)
-  #  print(type(thread))
-
-  #  message=client.beta.threads.messages.list(thread_id='thread_Ob1XbSj6toBjKE9lMgkCkxO1')
-  #  print(message)
   
